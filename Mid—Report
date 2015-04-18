@@ -1,0 +1,189 @@
+1.	毕业设计进展
+1.1.	已完成工作
+目前设计定义文件系统结构和运行流程，主要设计过程为：在内存中开辟一块内存创建一个文件”Linux.EXT2”作为本次模拟压缩文件系统的系统磁盘。
+解析定义了磁盘组织结构：如定义了BLOCKSIZ（磁盘块的大小）= 512、DATABLKNUM（数据块的数目）= 512、DINODESIZ(磁盘i结点区的大小（空间32×512）) = 512、DATASTART（数据区的开始地址）= (2+DINODENUM)*BLOCKSIZ、DINODESTART（i结点区的开始地址-inodes table） =  4*BLOCKSIZ，DATASTARTNO(数据区开始指针) = 36等一系列关于磁盘组织、权限管理、密码属性、文件空间分配组织、管理结构，并且对系统中用户个数、目录/子目录个数、文件个数、文件大小等一些文件属性进行限制。这些定义将为以后，文件储存的空间开辟和管理提供结构保证和依据，为用户权限分配提供依据，为模块化的文件系统结构定义好磁盘基础。
+查询资料得到EXT2文件系统的组织方式和优点，EXT2文件系统的信息都保存在数据块中，数据块的长度相同，其物理结构如下表所示。EXT2所占的磁盘除引导块外，逻辑分区划分为块组，每个块组依次包括超级块、块组描述符表、块位示图、索引节点位示图、索引节点表及数据块区，重复保存有关文件系统的关键信息及存储的文件和目录信息。
+0组	1组	……	i组	……	n组
+每组对应如下数据结构:
+超级块	组描述符表	块位图	Inode位图表	Inode表	数据块
+采用块组划分的目的一是提高文件系统可靠性，每个块组中都有管理信息的副本，当文件系统崩溃是可很容易地恢复；二是提高文件系统性能，由于块组内数据块靠近其索引节点，文件索引节点靠近其目录索引节点，从而，将磁头定位时间减到最少，加快磁盘访问速度。
+1.	索引节点数据结构，系统中没一个文件都是由一个inode来唯一描述的，inode包含了文件内容、在磁盘上的位置、文件的存取权限、修改时间以及类型等文件描述信息。每个块组的索引节点集中存放在一个索引节点表中，每个索引节点有唯一的索引节点号，索引节点位示图记录索引节点的分配情况，索引节点起着文件控制块的作用，可用来对文件进行控制和管理。
+struct inode{
+//  char di_name[DIRSIZ];
+	uint16_t di_ino; /*磁盘i节点标识*/
+	uint16_t di_number; /*关联文件数，当为0时表示删除文件*/
+	uint16_t di_mode; /*存取权限*/
+	uint16_t di_uid; /*磁盘i节点用户id*/
+	uint16_t di_gid; /*磁盘i节点权限组id*/ //1管理员组 2用户组
+	uint32_t di_size; /*文件大小*/
+	time_t di_ctime;   /* Creation time */
+	time_t di_mtime;   /* Modification time */
+	uint16_t di_block[P_N_BLOCKS]; /* 一组 block 指针 */
+     };
+2.	超级快数据结构，超级块用super_block结构表示用来描述目录和文件在磁盘上的静态分布，包括尺寸和结构，每个块组都有一个超级块，只有块组号为0的超级块才被读入主存，直至卸载，其他快组的超级块仅作为恢复备份
+struct super_block{
+	uint16_t s_inodes_count;      /* inodes 计数 */	
+	uint16_t s_blocks_count;      /* blocks 计数 */
+	uint16_t s_r_blocks_count;    /* 保留的 blocks 计数 */
+	uint16_t s_free_blocks_count; // 空闲的 blocks 计数
+	uint16_t s_free_inodes_count; /* 空闲的 inodes 计数 */
+	uint16_t s_free_blocks_group[GROUPNUM];//新增 一个数组来记录每个数据块组中的空闲数据块计数
+	uint16_t s_first_data_block;  /* 第一个数据 block */
+	uint16_t s_log_block_size;    /* block 的大小 */
+	uint16_t s_blocks_per_group;  /* 每 block group 的 block 数量 */
+	uint16_t s_inodes_per_group;  /* 每 block group 的 inode 数量 */
+};
+3.	用户和口令数据结构，为用户用户登录注销提供依据
+struct pwd{
+	uint8_t p_uid;
+	uint8_t p_gid;
+	char username[UNAMSIZ];/*用户名  新加的*/
+	char password[UPWDSIZ];
+};
+4.	有关目录的数据结构，为文件组织提供基础
+struct direct{
+	char d_name[DIRSIZ]; /*目录名（14字节）*/
+	uint16_t d_ino; /*目录号*/
+};
+struct dir{
+	struct direct direct[DIRNUM];
+	uint16_t size;
+};
+文件空间管理实现采用了位图表，位示图（Bit Map）（见图）是反应整个文件存储空间分配情况的数据结构。其中bit=0表示该块是空闲块，bit=1表示该块已分配。
+
+0	……	0	1	1	0	0	1	……	1
+位图表
+
+然后具体设计了磁盘操作分配，文件管理组织等相关具体函数实例，目前已完成包含了格式化（extern int Format()）、登录（void login();）、创建文件（int creat(char[])）、（int cdir(char[]) )创建目录、重命名文件（目录）（int renam(char[])）、删除文件（目录）（int deletefd(char[])）、注销（void logout()）、启动，安装文件系统（extern int Install()）、install里面读取文件dinode(struct inode * read_inode(int))、读取存储文件夹的物理块（struct direct * read_dir_data(int)）、dir命令，展示当前目录下的文件或目录（extern  void showdir()）、进入某个文件夹 命令—cd(int Enterdir(char[]))、查找当前目录里的文件 没找到返回-1 找到返回inode号（int Fd_dirfile(char[])）、读取文件（char * ReadFile(char[])）、显示位图（void showbitmap()）、编辑文件（int editfile(char[])）、帮助命令--help（void showhelp()）、权限判断（int access()）等几个简单功能的实现，而且能完成超级块的读写、节点的读写等过程，是一个比真正文件系统简单的多，而又能基本体现文件系统理论的程序。在超级块的实现上，采用采用操作系统这方面的经典理论；而在节点的使用上，主要是模仿Linux的EXT2文件系统。
+其中部分主要功能详细实现流程如下：
+
+ 
+ 
+ 
+ 
+实现了文件系统基本功能后，目前正做手，文件系统实时自动监视文件变化，实现动态压缩，现已完成文件侦测功能函数void Compression(),实现实时侦测文件变化，void choose()函数实现菜单选择压缩选项。
+目前压缩文件系统，运行平台基础及框架已搭建完成。能实现各类用户登录，对磁盘进行管理管理和文件的基本操作。
+1.2.	待完成工作
+目前对文件压缩系统所需要的硬件软件需求已经满足，文件系统也已经构建完成，接下来，准备实现，系统对文件的动态压缩。
+是否动态压缩将跟据文件大小以及闲置时间来判定。设计思路为：
+计划设定文件创建时间time_t  di_ctime; ，文件最后修改时间time_t  di_mtime;来侦测文件最后被访问时间，再以time（NULL）获取当前时间，利用库函数提供的函数通过如下方式获得文件闲置时间：(int)abs(difftime(time(NULL),inodetemp->di_mtime) = Dtime（文件闲置时间精确到s）。通过把文件实际闲置时间与用户选择的压缩临界闲置时间作比较，超过临界值，系统将自动压缩闲置时间过久地文件，以节约系统开销，
+	然后关注文件大小，实时的将当前文件大小与用户所选的动态压缩文件大小临界值时作比较设计表现形式为：inodetemp->di_size（获取的文件大小） >= Csize（用户选择动态压缩文件大小临界值），基本实现流程构想与之前的关于闲置时间实现构想一样，只是比较数据类型变化而已。
+	用户菜单计划模拟showhelp（）；函数，直接打印出各个选项内容提供菜单选项，让用户在登录系统时，即刻选择自己满意的自动压缩阈值，此法简单易实现，用户也不用自己考虑太多细节，完全由系统提供选项，直接做出选择即可。
+	目前实现用户通过菜单选择，自动压缩各个选项与压缩阈值，计划利用与showhelp();函数一样的原理，直接打印选项，给出A，B,C，D两组四个不同选项，每个选项对应一个数据，(如A：10  B：20  C：30  D：40)，系统自动捕获用户所选项所对应的数值，将其存入全局静态变量，提供系统自动压缩的比较依据。
+然后还需要实现具体的动态压缩过程，其中所需结构在之前已经定义，如时间监测：di_ctime,di_mtime等，系统比较临界值Czize,Dtime。在具体实现动态压缩之前必须有文件遍历功能，以实现文件的动态实时的更新。
+然后再是动态压缩具体流程，具体实现流程具体设计如下：
+ 
+按文件大小，实现的动态压缩过程，基本流程与之前的按文件闲置时间压缩过程设计基本一致。
+然后由于压缩过程的引入，以前的创建文件函数，和文件编辑函数，都将进一步改进，在文件创建时，和修改之后，都需要对新文件进行自动压缩判定，对满足压缩条件的文件在创建后或编辑后的储存就直接压缩储存，对于编辑后不再适合压缩储存的压缩文件进行解压，以减少在文件遍历过程中的重复操作。
+最后制定详细的测试计划，找寻设计中的漏洞，加以完善和改正。发现并修复程序中的bug，提高此动态压缩文件系统的稳定性和高效性。
+2.	对应进展的举措
+2.1.	存在问题
+一、	前期设计中，对磁盘分配，文件属性不是很了解，在对磁盘空间的划分和文件的组织，起始地址等的寻找和获取，都不是很熟悉。由于对于磁盘分配的不了解，导致文件的储存，寻找遍历等文件的无法具体实现，在实现过程中出现了很多内存地址方面的错误，而且极难发现和更正，使得后期工作根本无法展开，因为磁盘分配组织是系统运行的前提和基础，所以是后面工作的一个必要前提。
+二、	再者文件系统的运行流程，是在设计过程中随着代码的编写逐步实现的，没有一个统一的架构，和流程设计，在实现过程中，没有既定实现方法和步骤，所以实现的过过程比较缓慢，而且稳定性差，重复率和错误率都比较大，功能残缺，多次在实现过程中发现新的之前没有考虑到的必要过程，又着手添加，即浪费编程时间，又阻断了之前连续的思想路线，而且降低了系统稳定性，所以在具体开始实现之前，没有系统的分析系统需求，绘制完整的流程图作为实现标准。
+三、	然后再定义好磁盘结构后，第一步是实现普通的文件系统，这些实现方法和过程有许多的资料可以参考，但是在实现了基本文件系统后，需要实现的压缩过程依赖于文件系统的遍历，但是遍历过程还有待确定最佳方法，因为之前大部分函数为void类型无返回，或int类型只用于判定，指针操作为实时进行，随用户对文件的操作而实时变更，现在需要对文件系统实现遍历，而且还是重复无限的循环遍历，在其遍历过程中就会改变一些原先的全局变量指针，对于文件系统的稳定性，这将是灾难性的，如当前目录指针（cur_inode）,遍历过程中，会有查找，进入，读取等操作，而这些操作已经写好，而且是随用户的操作而实时更新的，所以会更改当前目录指针，以对应用户的实时操作，但是动态压缩为后台功能，用户并不会知道具体运行过程，也不应该对用户正在进行的操作有任何干扰，但是在遍历过程中如果更改了当前目录指针，可能出现进入用户本不想进入的文件，或进入用户完全没意识到的文件，造成毁灭性的安全隐患，如下进入文件的函数代码：
+int Enterdir(char* namestr) {//进入目录
+int i;
+i=Fd_dirfile(namestr);
+		if(i!=-1){
+			read_inode(i);
+			if((inodetemp->di_mode&DIMODE_DIR)!=DIMODE_DIR)
+			{
+				printf("%s 不是目录!\n",namestr);
+				return -1;
+			}
+			if(!access()){
+				printf("您没有权限!\n");
+				return -1;
+			}
+			changeinode();
+		}
+		else{
+			printf("未找到该文件!请输入正确的文件或目录名\n");
+			return -1;
+		}
+		read_dir_data(cur_inode->di_block[0]);
+		return 1;
+}
+其中的read_inode(i) 获取现在所在目录下浏览到的文件节点地址，并且存入inodetemp之中，Fd_dirfile(namestr);进入目录文件，遍历过程中会有进入目录的情况，就会涉及到changeinode()函数，代码如下：	
+void changeinode(){//交换 cur_inode和inodetemp 指针
+struct inode *intemp;
+		intemp=cur_inode;
+		cur_inode=inodetemp;
+		inodetemp=intemp;
+	}
+此函数将把目录下浏览到的节点的地址付给当前指针cur_inode,使得当前指针和用户操作目录指针出现不一致的情况。
+再者文件遍历是随文件系统的运行开始便一直在运行的程序，知道文件系统用户注销退出自己的系统为止。之前和现在同样存在的一个关键问题就是，如何在不影响用户对文件系统实时准确的操作的情况下，系统自发而且透明的实现的自己的文件遍历。
+
+四、	再者就是编译过程中的错误，由于之前较多的实在vs下进行开发，vs下c语言和linux下Gcc编译规则存在一定区别：
+	第一类错误为类型定义unsigned  __int16  di_ino,在linux下则不能识别，必须定义为 uint16_t di_ion，否则编译器就会报出如下错误：”filesystem.c:101:20: error: expected ‘:’, ‘,’, ‘;’, ‘}’ or ‘__attribute__’ before ‘di_ino’unsigned __int16  di_ino; /*磁盘i节点标识*/
+filesystem.c:132:1: error: unknown type name ‘__int16’
+ __int16 d_ino; /*目录号*/”
+报告符号，或者发现没用定义的变量。
+	第二类错误是函数定义调用不一致的错误：“filesystem.c:278:5: error: conflicting types for ‘rename’
+int rename(char[]);//重命名
+In file included from filesystem.c:1:0:
+/usr/include/stdio.h:180:12: note: previous declaration of ‘rename’ was here
+ 			extern int rename (const char *__old, const char *__new) __THROW;“
+	第三类，由于window与linux文件组织的不一样，在window上测试运行良好的程序，在linux编译运行时文件系统能够正常运行但是退出后，再次无格式化进入文件系统时会提示“段错误（核心已储存）！”的提示。
+2.2.	解决举措
+1)	linux文件系统结构和文件组织的不了解问题
+通过网上查询资料，和书本资料《unix基础教程》了解和熟悉磁盘结构体系，位图理论，磁盘分配模块，如数据块，超级快等，文件树形组织等，如：
+超级块：占用1#号块，存放文件系统结构和管理信息。 
+ 索引节点区：2#~（K+1）#块，存放索引节点表。索引节点记录文
+件属性，每个索引节点都有相同的大小和唯一的编号；文件系统中的每个文件在该表中都有一个索引节点。 
+ 数据区：（k+2）#~n#为数据块，文件的内容保存在这个区域的块中。
+从而比较准确的定义了磁盘组织和分配方式，文件管理和属性的设定如：
+#define BLOCKSIZ    512 //磁盘块的大小
+#define DATABLKNUM  512 //数据块的数目
+#define BLKGRUPNUM 50 //数据块组包含多少数据块
+#define P_N_BLOCKS 15 //inode节点中 指向数据块的指针个数
+#define GROUPNUM DATABLKNUM/BLKGRUPNUM+1 //数据块组 组数
+#define DINODESIZ   512 //磁盘i结点区的大小（空间32×512）
+#define DINODENUM   32 //磁盘i结点区的块数
+#define SYSOPENFILE 40
+#define DIRNUM      32 //一个目录下的最多目录和文件的总和数
+#define DIRSIZ      14 //文件、目录名的长度(字节)
+#define UPWDSIZ     15 //秘密的长度
+#define UNAMSIZ     15 //用户名的长度
+#define PWDSIZ sizeof(struct pwd) //密码结构的长度      
+#define PWDNUM      BLOCKSIZ/PWDSIZ //密码数据空间的大小（pwd为单位）
+#define NOFILE      20 //一个用户最多可以打开的文件数目
+#define NHINO       128
+#define USERNUM     10 //用户名的长度
+#define DINODESTART 4*BLOCKSIZ //i结点区的开始地址-inodes table ，1引导 2超块 3block bitmap 4inode bitmap
+#define DATASTART   (2+DINODENUM)*BLOCKSIZ //数据区的开始地址
+#define DATASTARTNO 36 //数据区开始指针
+/*  di._mode  */
+#define DIMODE_EMPTY 00000/*可以用的空间*/
+#define DIMODE_FILE 00001
+#define DIMODE_DIR      00002
+#define DIMODE_PASSWD 00004
+#define DIMODE_SYSTEM 00040 /*系统文件*/
+#define DIMODE_READ     00010 /*  READ  和该数与操作后得到的是可以读该文件的用户组*/
+#define DIMODE_WRITE    00020 /*  WRITE  */
+#define DIMODE_EXICUTE  01000 /*  EXICUTE  */
+#define DIMODE_ADMIN 00100 /*管理员权限*/
+#define DIMODE_SHARE 00200 /*不需要权限*/
+/*组*/
+#define GRUP_0 0 //管理员组
+#define GRUP_1 1
+#define GRUP_2 2
+#define GRUP_4 4
+2)	对于项目开发经验的不足，没有在实现之前分析系统流程制作完备流程图，在开始设计初期发现困难，然后做出需求分析，完善了前期工作，制作了详细的实现计划并绘制了大体流程图:
+
+ 
+在设计需求函数和文件流程之后便按照流程图详细实现过程，明确而高效，极大的的提高了开发效率。 
+3)	对于文件遍历错误的更改指针的问题
+设计了单独的文件节点指针，对随用户而实时变动的当前文件指针区分开来，但是查询，进入等很多文件操作，在文件遍历中也会被用到，这些函数中大部分都是无输入类型函数，同样会会更改文件指针，重新特意为文件遍历而重写，各种文件操作耗时费力，而且函数重复，意义不明，不利于系统维护，所以现在，初步决定重写一些函数，使得函数变为有输入类型函数，只更改传入的指针当前指针，比如之前的changeinode();函数重写为：
+void changeinode(inode * newcur_inode){//交换 cur_inode和inodetemp 指针
+			struct inode *intemp;
+			temp=newcur_inode;
+			newcur_inode=inodetemp;
+			inodetemp=intemp;
+}
+这样有传值的的交换指针，按设计考虑来说，应该能实现指针区分，当前目录指针仍然更改交换，但是只交换传入指针，便能够实现系统指针和用户指针的区分使用。
+所以改进思路为，所有需要用到的更改指针的函数，用传入指针变量更新，用于区分。
+4)	编译过程中的错误：
+i.	unsigned  __int16 定义不被识别，改为 uint16_t,其他整型类似定义，并且添加#include <stdint.h>头文件。
+ii.	第二类错误是函数定义调用不一致的错误:是由于所定义函数与系统函数名重复，不可重定义，比如rename();是系统函数，不能被重定义。所以改为了renamed（）；
+iii.	段错误（核心已储存）！的错误，资料显示是内存分配，和指针管理的问题，可能是指针外泄，导致原因很可能是指针定义和使用的不规则导致的，此错误现阶段正在解决中，还没有得到实质性的解决。
